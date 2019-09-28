@@ -69,7 +69,7 @@ module.exports = async (req, res, next) => {
 
         const { altText, file, ...itemInfo } = output;
 
-        const total = await getCartTotals(cart.pid);
+        const total = await getCartTotals(cart.id);
 
         res.send({
             cartId: cart.pid,
@@ -82,10 +82,7 @@ module.exports = async (req, res, next) => {
                 }
             },
             message: `${quantity} ${itemInfo.name} cupcakes added to cart`,
-            total: {
-                cost: parseInt(total.cost),
-                items: parseInt(total.items)
-            }
+            total: total
         });
     } catch(err) {
         next(err);
