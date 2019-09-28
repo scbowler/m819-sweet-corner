@@ -1,12 +1,18 @@
 const db = require('../../../db');
 const jwt = require('jwt-simple');
 const { cartSecret } = require('../../../config/jwt_cart');
+const { imageUrl, getCartTotals } = require('../../../helpers');
 
 module.exports = async (req, res, next) => {
     try {
         let cartToken = req.headers['x-cart-token'] || null;
+        const { quantity = 1 } = req.body;
         const { product_id } = req.params;
         let cartId = null;
+
+        if(isNaN(quantity)){
+            throw new StatusError(422, 'Invalid quantity received, must be a number');
+        }
 
         const [[product = null]] = await db.execute('SELECT id FROM products WHERE pid=?', [product_id]);
 
@@ -37,27 +43,49 @@ module.exports = async (req, res, next) => {
             cartId = tokenData.cartId;
         }
 
+        const [[cart]] = await db.query('SELECT * FROM cart WHERE id=?', [cartId]);
+
         const [[existingItem = null]] = await db.query('SELECT id, quantity FROM cartItems WHERE productId=? AND cartId=?', [product.id, cartId]);
+        let itemId = null;
 
         if(!existingItem){
-            const [addItemResult] = await db.execute('INSERT INTO cartItems (pid, cartId, productId, quantity) VALUES (UUID(), ?, ?, ?)', [cartId, product.id, 1]);
+            const [addItemResult] = await db.execute('INSERT INTO cartItems (pid, cartId, productId, quantity) VALUES (UUID(), ?, ?, ?)', [cartId, product.id, quantity]);
 
-            console.log('Add Item Result:', addItemResult);
+            itemId = addItemResult.insertId;
         } else {
-            // Update existing items quantity
+            const [updateResult] = await db.execute('UPDATE cartItems SET quantity=quantity + ? WHERE id=?', [quantity, existingItem.id]);
+            
+            itemId = existingItem.id;
         }
 
-        // {
-        //     cartId: '',
-        //     cartToken: '',
-        //     message: '1 cupcake added to cart'
-        // }
+        const [[output]] = await db.query(`
+            SELECT ci.createdAt AS added, p.cost AS "each", ci.pid AS itemId, p.name,
+                p.pid AS productId, ci.quantity, i.altText, i.file, (p.cost * ci.quantity) AS total 
+            FROM cartItems AS ci 
+            JOIN products AS p ON ci.productId=p.id
+            JOIN images AS i ON i.productId=p.id
+            WHERE ci.id=? AND i.type="thumbnail" LIMIT 1
+        `, [itemId]);
+
+        const { altText, file, ...itemInfo } = output;
+
+        const total = await getCartTotals(cart.pid);
 
         res.send({
-            message: 'Add item to cart',
-            productId: product_id,
-            cartToken,
-            cartId
+            cartId: cart.pid,
+            cartToken: cartToken,
+            item: {
+                ...itemInfo,
+                thumbnail: {
+                    altText: altText,
+                    url: imageUrl(req, 'thumbnail', file)
+                }
+            },
+            message: `${quantity} ${itemInfo.name} cupcakes added to cart`,
+            total: {
+                cost: parseInt(total.cost),
+                items: parseInt(total.items)
+            }
         });
     } catch(err) {
         next(err);
