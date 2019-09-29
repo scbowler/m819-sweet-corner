@@ -7,6 +7,9 @@ global.StatusError = StatusError;
 
 const app = express();
 
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+
 const routes = require('./routes');
 app.use(routes);
 
